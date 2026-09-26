@@ -1,0 +1,2 @@
+- [ ] Buy rice <!-- md:task id="rice" due="2026-09-28" status="active" -->
+- [ ] Call bank <!-- md:task id="bank" due="2026-09-29" status="waiting" -->
