@@ -156,3 +156,44 @@ func TestSetTaskCheckedEditsOriginalSourceAndRejectsStaleData(t *testing.T) {
 		t.Fatal("stale task edit was accepted")
 	}
 }
+
+func TestSetTaskStatusPreservesMetadataAndChecksFinalStatus(t *testing.T) {
+	source := []byte("# Board\n- [ ] 企画を書く <!-- md:task id=\"plan\" due=\"2026-10-02\" status=\"todo\" -->\n")
+	task := Task{MarkerStart: len("# Board\n- "), Source: SourceRef{Hash: contentHash(source)}}
+	updated, err := SetTaskStatus(source, task, "doing", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(updated), `id="plan" due="2026-10-02" status="doing"`) {
+		t.Fatalf("metadata changed unexpectedly: %s", updated)
+	}
+	if !strings.Contains(string(updated), "- [ ] 企画を書く") {
+		t.Fatalf("marker changed: %s", updated)
+	}
+	if _, err := SetTaskStatus(source, task, "bad status", false); err == nil {
+		t.Fatal("invalid status accepted")
+	}
+	if _, err := SetTaskStatus(append([]byte("new\n"), source...), task, "doing", false); err == nil {
+		t.Fatal("stale edit accepted")
+	}
+	parsedTask := Task{MarkerStart: task.MarkerStart, Source: SourceRef{Hash: contentHash(updated)}}
+	completed, err := SetTaskStatus(updated, parsedTask, "done", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(completed), "- [x] 企画を書く") || !strings.Contains(string(completed), `status="done"`) {
+		t.Fatalf("completion not applied: %s", completed)
+	}
+}
+
+func TestSetTaskStatusAddsMetadataWhenMissing(t *testing.T) {
+	source := []byte("- [ ] New task\n")
+	task := Task{MarkerStart: 2, Source: SourceRef{Hash: contentHash(source)}}
+	updated, err := SetTaskStatus(source, task, "doing", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated) != "- [ ] New task <!-- md:task status=\"doing\" -->\n" {
+		t.Fatalf("unexpected edit: %s", updated)
+	}
+}

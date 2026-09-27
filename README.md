@@ -44,11 +44,15 @@ and use the expanded AST to populate widgets.
 `SetTaskChecked` returns edited Markdown source. It checks the source hash
 before changing a task marker, so callers can resolve sync conflicts instead
 of overwriting newer edits.
+`SetTaskStatus(source, task, status, completed)` also checks the source hash,
+then edits only the original task line's `status` attribute and checkbox marker.
+The application supplies the ordered status definition from YAML front matter.
 
 ## Apple bridge
 
 The `mobile` package exposes `ParseDirectory(root, entry)` and
-`SetTaskChecked(source, taskJSON, checked)` as string-based functions suitable
+`SetTaskChecked(source, taskJSON, checked)` and
+`SetTaskStatus(source, taskJSON, status, completed)` as string-based functions suitable
 for Go Mobile binding. Generate the Apple XCFramework with:
 
 ```sh

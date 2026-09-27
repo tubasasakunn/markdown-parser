@@ -3,9 +3,11 @@
 package markdownparser
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"regexp"
 )
 
 const SchemaVersion = 1
@@ -61,6 +63,10 @@ type Document struct {
 
 var ErrStaleTask = errors.New("task source changed since parsing")
 var ErrTaskMarker = errors.New("task marker is missing at its source location")
+var ErrTaskStatus = errors.New("invalid task status")
+
+var statusIDPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
+var statusAttributePattern = regexp.MustCompile(`(^|\s)status="[^"]*"`)
 
 func contentHash(source []byte) string {
 	sum := sha256.Sum256(source)
@@ -84,5 +90,57 @@ func SetTaskChecked(source []byte, task Task, checked bool) ([]byte, error) {
 	} else {
 		result[start+1] = ' '
 	}
+	return result, nil
+}
+
+// SetTaskStatus updates only the original task line. It keeps other metadata
+// attributes and sets the checkbox when the destination is the final status.
+// The caller determines that ordering from the board's front matter.
+func SetTaskStatus(source []byte, task Task, status string, completed bool) ([]byte, error) {
+	if !statusIDPattern.MatchString(status) {
+		return nil, ErrTaskStatus
+	}
+	if contentHash(source) != task.Source.Hash {
+		return nil, ErrStaleTask
+	}
+	start := task.MarkerStart
+	if start < 0 || start+3 > len(source) || source[start] != '[' || source[start+2] != ']' ||
+		(source[start+1] != ' ' && source[start+1] != 'x' && source[start+1] != 'X') {
+		return nil, ErrTaskMarker
+	}
+	lineStart := bytes.LastIndexByte(source[:start], '\n') + 1
+	lineEnd := len(source)
+	if newline := bytes.IndexByte(source[start:], '\n'); newline >= 0 {
+		lineEnd = start + newline
+	}
+	line := append([]byte(nil), source[lineStart:lineEnd]...)
+	metadata := taskMetadataPattern.FindSubmatchIndex(line)
+	if metadata != nil {
+		attrs := line[metadata[2]:metadata[3]]
+		if _, err := parseAttributes(string(attrs)); err != nil {
+			return nil, err
+		}
+		if current := statusAttributePattern.FindIndex(attrs); current != nil {
+			prefix := ""
+			if attrs[current[0]] == ' ' || attrs[current[0]] == '\t' {
+				prefix = " "
+			}
+			replacement := []byte(prefix + `status="` + status + `"`)
+			line = append(append(append([]byte(nil), line[:metadata[2]+current[0]]...), replacement...),
+				line[metadata[2]+current[1]:]...)
+		} else {
+			position := metadata[3]
+			line = append(append(append([]byte(nil), line[:position]...), []byte(` status="`+status+`"`)...), line[position:]...)
+		}
+	} else {
+		line = append(bytes.TrimRight(line, " \t"), []byte(` <!-- md:task status="`+status+`" -->`)...)
+	}
+	line[start-lineStart+1] = ' '
+	if completed {
+		line[start-lineStart+1] = 'x'
+	}
+	result := append([]byte(nil), source[:lineStart]...)
+	result = append(result, line...)
+	result = append(result, source[lineEnd:]...)
 	return result, nil
 }
