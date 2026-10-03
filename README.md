@@ -78,3 +78,17 @@ used directly with `go get github.com/tubasasakunn/markdown-parser`.
 go test ./...
 go run ./cmd/mdparse -root testdata/tasks WIDGET_TODO.md
 ```
+
+Reminders use editable task checkboxes with `md:reminder` metadata:
+
+```md
+- [ ] Take medicine <!-- md:reminder id="medicine" at="2026-10-04T09:00" -->
+```
+
+`at` accepts a local date and time (`YYYY-MM-DDTHH:mm`) or RFC3339 with a
+UTC offset. The parser adds `reminder="true"` to the task attributes and reports
+`reminder_invalid` for missing or invalid dates. Native clients interpret local
+times in the device time zone and schedule notifications. Use
+`::tasks from="**/*.md" where="reminder=true" sort="at"` to collect reminders.
+Fenced examples are not reminders. Completion still uses `SetTaskChecked` and
+preserves the reminder's metadata and source file.

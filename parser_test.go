@@ -236,3 +236,43 @@ func TestSetTaskStatusAddsMetadataWhenMissing(t *testing.T) {
 		t.Fatalf("unexpected edit: %s", updated)
 	}
 }
+
+func TestReminderMetadataIncludesQueriesAndCheckboxEditing(t *testing.T) {
+	source := "- [ ] 薬を飲む <!-- md:reminder id=\"medicine\" at=\"2026-10-04T09:00\" -->\n"
+	files := fstest.MapFS{
+		"reminders/one.md": {Data: []byte(source)},
+		"widget.md":        {Data: []byte("::tasks from=\"reminders/**/*.md\" where=\"reminder=true\" sort=\"at\"\n")},
+	}
+	doc, err := Parse(context.Background(), files, "widget.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Tasks) != 1 || len(doc.Diagnostics) != 0 {
+		t.Fatalf("unexpected document: %#v", doc)
+	}
+	task := doc.Tasks[0]
+	if task.Text != "薬を飲む" || task.Attributes["reminder"] != "true" || task.Attributes["at"] != "2026-10-04T09:00" || task.Source.Path != "reminders/one.md" {
+		t.Fatalf("unexpected reminder: %#v", task)
+	}
+	updated, err := SetTaskChecked([]byte(source), task, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(updated) != strings.Replace(source, "[ ]", "[x]", 1) {
+		t.Fatalf("metadata changed: %s", updated)
+	}
+}
+
+func TestReminderDatesAndCodeFences(t *testing.T) {
+	for _, date := range []string{"2026-10-04T09:00", "2026-10-04T09:00:00+09:00", "2026-10-04T00:00:00Z", "2026-02-30T09:00", "2026-10-04", "", "2026-10-04T25:00"} {
+		source := "- [ ] Test <!-- md:reminder at=\"" + date + "\" -->\n\n```md\n- [ ] Sample <!-- md:reminder at=\"invalid\" -->\n```\n"
+		doc, err := Parse(context.Background(), fstest.MapFS{"a.md": {Data: []byte(source)}}, "a.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		valid := strings.HasPrefix(date, "2026-10-04T09:00") || date == "2026-10-04T00:00:00Z"
+		if hasDiagnostic(doc, "reminder_invalid") == valid || len(doc.Tasks) != 1 {
+			t.Errorf("unexpected validation for %q: %#v", date, doc)
+		}
+	}
+}

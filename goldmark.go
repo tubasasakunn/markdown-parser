@@ -6,13 +6,16 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/yuin/goldmark/ast"
 	east "github.com/yuin/goldmark/extension/ast"
 )
 
 var taskMarkerPattern = regexp.MustCompile(`^\s*(?:[-+*]|[0-9]+[.)])\s+(\[[ xX]\])`)
-var taskMetadataPattern = regexp.MustCompile(`<!--\s*md:task\s+([^>]*?)\s*-->`)
+var reminderMetadataPattern = regexp.MustCompile(`<!--\s*md:reminder\s+([^>]*?)\s*-->`)
+
+var taskMetadataPattern = regexp.MustCompile(`<!--\s*md:(?:task|reminder)\s+([^>]*?)\s*-->`)
 
 func (e *engine) convertNode(original ast.Node, file string, source, masked []byte, hash string, stack []string) *Node {
 	node := &Node{Kind: kindFor(original), Source: nodeSource(original, file, hash, stack)}
@@ -174,6 +177,19 @@ func (e *engine) makeTask(node *Node, file string, source []byte, hash string, s
 	if metadata := taskMetadataPattern.FindSubmatch(line); len(metadata) > 1 {
 		if parsed, err := parseAttributes(string(metadata[1])); err == nil {
 			attrs = parsed
+		}
+	}
+	if reminderMetadataPattern.Match(line) {
+		attrs["reminder"] = "true"
+		valid := false
+		for _, layout := range []string{"2006-01-02T15:04", time.RFC3339} {
+			if _, err := time.Parse(layout, attrs["at"]); err == nil {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			e.diagnostic("reminder_invalid", "reminder requires at=\"YYYY-MM-DDTHH:mm\" or an RFC3339 timestamp", node.Source)
 		}
 	}
 	checked := checkboxChecked(node)
