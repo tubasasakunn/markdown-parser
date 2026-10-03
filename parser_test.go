@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 )
 
 func fixture(t *testing.T, group, entry string) Document {
@@ -73,6 +74,44 @@ func TestNestedIncludeKeepsSource(t *testing.T) {
 	grandchild := nodesOfKind(doc.Root, "heading")
 	if len(grandchild) != 3 || grandchild[2].Source.Path != "notes/grand.md" {
 		t.Fatalf("lost grandchild source: %#v", grandchild)
+	}
+}
+
+func TestIncludeSummarySectionSelectsOnlySummaryContents(t *testing.T) {
+	files := fstest.MapFS{
+		"index.md": {Data: []byte("::include path=\"notes.md\" section=\"summary\"\n")},
+		"notes.md": {Data: []byte(":::summary\nShort **summary**.\n:::\n\n# Full notes\nLong details stay in the source.\n")},
+	}
+	doc, err := Parse(context.Background(), files, "index.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	included := nodesOfKind(doc.Root, "include")
+	if len(included) != 1 || len(included[0].Children) != 1 {
+		t.Fatalf("unexpected summary include: %#v", included)
+	}
+	if got := visibleText(included[0].Children[0]); got != "Short summary." {
+		t.Fatalf("included the wrong summary content: %q", got)
+	}
+	if len(nodesOfKind(included[0], "heading")) != 0 || strings.Contains(visibleText(included[0]), "Long details") {
+		t.Fatalf("summary include leaked the rest of the document: %#v", included[0].Children)
+	}
+	if len(doc.Diagnostics) != 0 {
+		t.Fatalf("unexpected diagnostics: %#v", doc.Diagnostics)
+	}
+}
+
+func TestIncludeSummarySectionWithoutSummaryReportsDiagnostic(t *testing.T) {
+	files := fstest.MapFS{
+		"index.md": {Data: []byte("::include path=\"notes.md\" section=\"summary\"\n")},
+		"notes.md": {Data: []byte("Just the full note.\n")},
+	}
+	doc, err := Parse(context.Background(), files, "index.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasDiagnostic(doc, "include_section_missing") {
+		t.Fatalf("missing summary diagnostic: %#v", doc.Diagnostics)
 	}
 }
 

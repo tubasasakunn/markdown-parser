@@ -151,9 +151,9 @@ func (e *engine) resolveNodes(nodes []*Node, file string, stack []string) []*Nod
 			continue
 		}
 		line := strings.TrimSpace(visibleText(node))
-		if strings.HasPrefix(line, ":::callout ") {
-			if callout, ok := e.inlineCallout(node, file, stack); ok {
-				resolved = append(resolved, callout)
+		if strings.HasPrefix(line, ":::callout ") || strings.HasPrefix(line, ":::summary") {
+			if container, ok := e.inlineContainer(node, file, stack); ok {
+				resolved = append(resolved, container)
 				continue
 			}
 		}
@@ -189,7 +189,26 @@ func (e *engine) resolveNodes(nodes []*Node, file string, stack []string) []*Nod
 				resolved = append(resolved, node)
 				continue
 			}
-			resolved = append(resolved, &Node{Kind: "include", Attributes: map[string]string{"path": target}, Source: node.Source, Children: included.Children})
+			children := included.Children
+			if section := attrs["section"]; section != "" {
+				if section != "summary" {
+					e.diagnostic("include_section_invalid", "include section must be summary", node.Source)
+					resolved = append(resolved, node)
+					continue
+				}
+				children = nil
+				for _, child := range included.Children {
+					if child.Kind == "summary" {
+						children = child.Children
+						break
+					}
+				}
+				if children == nil {
+					e.diagnostic("include_section_missing", "included file has no summary block", node.Source)
+					children = []*Node{}
+				}
+			}
+			resolved = append(resolved, &Node{Kind: "include", Attributes: map[string]string{"path": target}, Source: node.Source, Children: children})
 		case strings.HasPrefix(line, "::tasks "):
 			attrs, err := parseAttributes(strings.TrimPrefix(line, "::tasks "))
 			if err != nil || attrs["from"] == "" {
@@ -198,10 +217,10 @@ func (e *engine) resolveNodes(nodes []*Node, file string, stack []string) []*Nod
 				continue
 			}
 			resolved = append(resolved, e.queryTasks(attrs, node.Source, stack))
-		case strings.HasPrefix(line, ":::callout "):
-			attrs, err := parseAttributes(strings.TrimPrefix(line, ":::callout "))
+		case strings.HasPrefix(line, ":::callout ") || strings.HasPrefix(line, ":::summary"):
+			kind, attrs, err := parseContainerAttributes(line)
 			if err != nil {
-				e.diagnostic("callout_invalid", err.Error(), node.Source)
+				e.diagnostic(kind+"_invalid", err.Error(), node.Source)
 				resolved = append(resolved, node)
 				continue
 			}
@@ -213,11 +232,11 @@ func (e *engine) resolveNodes(nodes []*Node, file string, stack []string) []*Nod
 				}
 			}
 			if end < 0 {
-				e.diagnostic("callout_unclosed", "callout needs a closing :::", node.Source)
+				e.diagnostic(kind+"_unclosed", kind+" needs a closing :::", node.Source)
 				resolved = append(resolved, node)
 				continue
 			}
-			resolved = append(resolved, &Node{Kind: "callout", Attributes: attrs, Source: node.Source, Children: e.resolveNodes(nodes[i+1:end], file, stack)})
+			resolved = append(resolved, &Node{Kind: kind, Attributes: attrs, Source: node.Source, Children: e.resolveNodes(nodes[i+1:end], file, stack)})
 			i = end
 		default:
 			resolved = append(resolved, node)
@@ -228,7 +247,7 @@ func (e *engine) resolveNodes(nodes []*Node, file string, stack []string) []*Nod
 
 // Goldmark treats a compact ::: container as one paragraph. Reparse its body
 // against a same-length masked source so every child keeps original offsets.
-func (e *engine) inlineCallout(node *Node, file string, stack []string) (*Node, bool) {
+func (e *engine) inlineContainer(node *Node, file string, stack []string) (*Node, bool) {
 	source, err := fs.ReadFile(e.files, file)
 	if err != nil || node.Source.Start < 0 || node.Source.End > len(source) || node.Source.Start >= node.Source.End {
 		return nil, false
@@ -241,12 +260,8 @@ func (e *engine) inlineCallout(node *Node, file string, stack []string) (*Node, 
 	}
 	opener := strings.TrimSpace(string(span[:firstBreak]))
 	closer := strings.TrimSpace(string(span[lastBreak+1:]))
-	if !strings.HasPrefix(opener, ":::callout ") || closer != ":::" {
-		return nil, false
-	}
-	attrs, err := parseAttributes(strings.TrimPrefix(opener, ":::callout "))
-	if err != nil {
-		e.diagnostic("callout_invalid", err.Error(), node.Source)
+	kind, attrs, attrErr := parseContainerAttributes(opener)
+	if attrErr != nil || closer != ":::" {
 		return nil, false
 	}
 	start := node.Source.Start + firstBreak + 1
@@ -259,8 +274,19 @@ func (e *engine) inlineCallout(node *Node, file string, stack []string) (*Node, 
 	}
 	parsed := e.markdown.Parser().Parse(text.NewReader(masked))
 	body := e.convertNode(parsed, file, source, masked, node.Source.Hash, stack)
-	return &Node{Kind: "callout", Attributes: attrs, Source: node.Source,
+	return &Node{Kind: kind, Attributes: attrs, Source: node.Source,
 		Children: e.resolveNodes(body.Children, file, stack)}, true
+}
+
+func parseContainerAttributes(opener string) (string, map[string]string, error) {
+	if opener == ":::summary" {
+		return "summary", nil, nil
+	}
+	if strings.HasPrefix(opener, ":::callout ") {
+		attrs, err := parseAttributes(strings.TrimPrefix(opener, ":::callout "))
+		return "callout", attrs, err
+	}
+	return "container", nil, fmt.Errorf("unsupported container")
 }
 
 func visibleText(node *Node) string {

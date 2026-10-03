@@ -25,6 +25,7 @@ containing the directive and stay inside the document root.
 
 ```md
 ::include path="notes/meeting.md"
+::include path="notes/meeting.md" section="summary"
 
 ::tasks from="tasks/**/*.md" where="status=open" sort="due"
 
@@ -32,10 +33,17 @@ containing the directive and stay inside the document root.
 Remember this.
 :::
 
+:::summary
+Short version for dashboards and other notes.
+:::
+
 - [ ] Pay invoice <!-- md:task id="invoice" status="open" due="2026-10-01" -->
 ```
 
 Standard Markdown and GitHub Flavored Markdown tasks and tables use Goldmark.
+An included file may expose a `:::summary` block; `section="summary"` includes
+only that block's contents. An include without `section` keeps including the
+whole file.
 YAML front matter is exposed as document metadata. Directive-like text in a
 fenced code block stays code. `WIDGET_TODO.md` and `WIDGET_MEMO.md` are app
 entrypoint conventions, not special syntax in the parser: apps can parse them
